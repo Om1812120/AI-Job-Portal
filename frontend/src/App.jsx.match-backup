@@ -1,0 +1,860 @@
+
+import { useEffect, useState } from "react";
+import {
+  Search, BriefcaseBusiness, Users, BrainCircuit, ArrowRight, LogOut,
+  UserRound, MapPin, Sparkles, ShieldCheck, Menu, X, Plus, RefreshCw,
+  FileText, Download
+} from "lucide-react";
+import api from "./api";
+import "./styles.css";
+
+
+const TOKEN_KEY = "ai_job_portal_token";
+
+function App() {
+  const [page, setPage] = useState("home");
+  const [authMode, setAuthMode] = useState("login");
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [jobs, setJobs] = useState([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobsRefresh, setJobsRefresh] = useState(0);
+  const [jobSubmitting, setJobSubmitting] = useState(false);
+  const [jobSearch, setJobSearch] = useState("");
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [resumeFile, setResumeFile] = useState(null);
+  const [coverLetter, setCoverLetter] = useState("");
+  const [applicationSubmitting, setApplicationSubmitting] = useState(false);
+  const [applicationError, setApplicationError] = useState("");
+  const [selectedApplicantsJob, setSelectedApplicantsJob] = useState(null);
+const [applicants, setApplicants] = useState([]);
+const [applicantsLoading, setApplicantsLoading] = useState(false);
+const [statusUpdatingId, setStatusUpdatingId] = useState("");
+
+  const [jobForm, setJobForm] = useState({
+    title: "", company: "", location: "", description: "",
+    requiredSkills: "", employmentType: "Full-time", salaryMin: "", salaryMax: ""
+  });
+
+  const [form, setForm] = useState({
+    name: "", email: "", password: "", role: "candidate"
+  });
+
+  const isLoggedIn = Boolean(token && user);
+
+  useEffect(() => {
+    if (!token) {
+      setUser(null);
+      return;
+    }
+    let active = true;
+    api.get("/auth/me")
+      .then((response) => {
+        if (active) setUser(response.data.user);
+      })
+      .catch(() => {
+        if (active) {
+          localStorage.removeItem(TOKEN_KEY);
+          setToken("");
+          setUser(null);
+        }
+      });
+    return () => { active = false; };
+  }, [token]);
+
+  function updateForm(event) {
+    setForm({ ...form, [event.target.name]: event.target.value });
+  }
+
+  function openAuth(mode) {
+    setAuthMode(mode);
+    setPage("auth");
+    setError("");
+    setNotice("");
+    setMobileMenu(false);
+  }
+
+  async function submitAuth(event) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    setLoading(true);
+    try {
+      const endpoint = authMode === "register" ? "/auth/register" : "/auth/login";
+      const payload = authMode === "register"
+        ? form
+        : { email: form.email, password: form.password };
+      const response = await api.post(endpoint, payload);
+      const receivedToken = response.data.token;
+      localStorage.setItem(TOKEN_KEY, receivedToken);
+      setToken(receivedToken);
+      setUser(response.data.user);
+      setNotice(response.data.message || "Success");
+      setPage("dashboard");
+      setForm({ name: "", email: "", password: "", role: "candidate" });
+    } catch (err) {
+      setError(err.response?.data?.message ||
+        "Unable to connect. Check whether the backend is running.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (page !== "dashboard" || !isLoggedIn || !user) return;
+    let active = true;
+    setJobsLoading(true);
+    const endpoint = user.role === "recruiter"
+      ? "/jobs/mine/posted"
+      : `/jobs${jobSearch.trim() ? `?search=${encodeURIComponent(jobSearch.trim())}` : ""}`;
+    api.get(endpoint)
+      .then((response) => {
+        if (active) setJobs(response.data.jobs || []);
+      })
+      .catch((err) => {
+        if (active) setError(err.response?.data?.message ||
+          "Could not load jobs. Please check the backend.");
+      })
+      .finally(() => {
+        if (active) setJobsLoading(false);
+      });
+    return () => { active = false; };
+  }, [page, isLoggedIn, user, token, jobSearch, jobsRefresh]);
+
+  function updateJobForm(event) {
+    setJobForm((current) => ({ ...current, [event.target.name]: event.target.value }));
+  }
+
+  async function submitJob(event) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    setJobSubmitting(true);
+    try {
+      const payload = {
+        ...jobForm,
+        requiredSkills: jobForm.requiredSkills.split(",").map((skill) => skill.trim()).filter(Boolean),
+        salaryMin: jobForm.salaryMin,
+        salaryMax: jobForm.salaryMax
+      };
+      const response = await api.post("/jobs", payload);
+      setNotice(response.data.message || "Job posted successfully.");
+      setJobForm({
+        title: "", company: "", location: "", description: "",
+        requiredSkills: "", employmentType: "Full-time", salaryMin: "", salaryMax: ""
+      });
+      const jobsResponse = await api.get("/jobs/mine/posted");
+      setJobs(jobsResponse.data.jobs || []);
+    } catch (err) {
+      setError(err.response?.data?.message || "Could not post job. Please try again.");
+    } finally {
+      setJobSubmitting(false);
+    }
+  }
+
+  async function submitApplication(event) {
+    event.preventDefault();
+    setApplicationError("");
+    setNotice("");
+    setError("");
+
+    if (!selectedJob) {
+      setApplicationError("Please select a job first.");
+      return;
+    }
+    if (!resumeFile) {
+      setApplicationError("Please upload your resume.");
+      return;
+    }
+    if (!/\.(pdf|doc|docx)$/i.test(resumeFile.name)) {
+      setApplicationError("Upload your resume as PDF, DOC, or DOCX.");
+      return;
+    }
+    if (resumeFile.size > 5 * 1024 * 1024) {
+      setApplicationError("Resume size must be 5 MB or less.");
+      return;
+    }
+
+    const applicationData = new FormData();
+    applicationData.append("resume", resumeFile);
+    applicationData.append("coverLetter", coverLetter);
+    setApplicationSubmitting(true);
+
+    try {
+      const response = await api.post(`/applications/${selectedJob._id}`, applicationData);
+      setNotice(response.data.message ||
+        `Application submitted successfully for ${selectedJob.title}!`);
+      setSelectedJob(null);
+      setResumeFile(null);
+      setCoverLetter("");
+      setApplicationError("");
+    } catch (err) {
+      setApplicationError(err.response?.data?.message ||
+        "Could not submit your application. Please try again.");
+    } finally {
+      setApplicationSubmitting(false);
+    }
+  }
+  
+  
+async function viewApplicants(job) {
+  setSelectedApplicantsJob(job);
+  setApplicants([]);
+  setApplicantsLoading(true);
+  setError("");
+  setNotice("");
+
+  try {
+    const response = await api.get(`/applications/job/${job._id}`);
+    // Support the API response shape used by the backend and avoid rendering
+    // a non-array value if the endpoint response is wrapped differently.
+    const receivedApplicants = Array.isArray(response.data?.applications)
+      ? response.data.applications
+      : Array.isArray(response.data?.data?.applications)
+        ? response.data.data.applications
+        : [];
+    setApplicants(receivedApplicants);
+    console.log("Applicants loaded:", receivedApplicants);
+  } catch (err) {
+    setError(
+      err.response?.data?.message || "Could not load applicants."
+    );
+  } finally {
+    setApplicantsLoading(false);
+  }
+}
+
+async function updateApplicantStatus(applicationId, status) {
+  setStatusUpdatingId(applicationId);
+  setError("");
+  setNotice("");
+
+  try {
+    const response = await api.patch(
+      `/applications/${applicationId}/status`,
+      { status }
+    );
+
+    setApplicants((current) =>
+      current.map((application) =>
+        application._id === applicationId
+          ? { ...application, status: response.data.application.status }
+          : application
+      )
+    );
+
+    setNotice("Application status updated successfully.");
+  } catch (err) {
+    setError(
+      err.response?.data?.message || "Could not update application status."
+    );
+  } finally {
+    setStatusUpdatingId("");
+  }
+}
+
+
+async function openApplicationResume(application, download = false) {
+  setError("");
+
+  try {
+    const response = await api.get(
+      `/applications/${application._id}/resume${download ? "?download=1" : ""}`,
+      { responseType: "blob" }
+    );
+
+    const blobUrl = URL.createObjectURL(response.data);
+    const link = document.createElement("a");
+
+    link.href = blobUrl;
+    link.target = download ? "_self" : "_blank";
+
+    if (download) {
+      const extension =
+        application.resumeUrl?.split(".").pop()?.toLowerCase() || "pdf";
+
+      link.download = `resume-${application._id}.${extension}`;
+    }
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+  } catch (err) {
+    setError(
+      err.response?.status === 403
+        ? "You are not authorized to access this resume."
+        : err.response?.status === 404
+          ? "Resume file was not found."
+          : "Could not open resume. Please check your login and backend."
+    );
+  }
+}
+
+
+  function logout() {
+    localStorage.removeItem(TOKEN_KEY);
+    setToken("");
+    setUser(null);
+    setPage("home");
+    setNotice("You have logged out.");
+    setError("");
+    setSelectedJob(null);
+  }
+
+  function goHome() {
+    setPage("home");
+    setMobileMenu(false);
+    setError("");
+  }
+
+  return (
+    <div className="app-shell">
+      <header className="navbar">
+        <button className="brand" onClick={goHome}>
+          <span className="brand-icon"><BrainCircuit size={24} /></span>
+          <span>Hire<span className="brand-accent">AI</span></span>
+        </button>
+        <button className="mobile-toggle" onClick={() => setMobileMenu(!mobileMenu)} aria-label="Toggle navigation">
+          {mobileMenu ? <X /> : <Menu />}
+        </button>
+        <nav className={mobileMenu ? "nav-links open" : "nav-links"}>
+          <button onClick={goHome}>Home</button>
+          <button onClick={() => {
+            setPage("home");
+            setMobileMenu(false);
+            document.getElementById("features")?.scrollIntoView({ behavior: "smooth" });
+          }}>Features</button>
+          {isLoggedIn ? <>
+            <button onClick={() => setPage("dashboard")}>Dashboard</button>
+            <button className="nav-logout" onClick={logout}><LogOut size={16} /> Logout</button>
+          </> : <>
+            <button onClick={() => openAuth("login")}>Login</button>
+            <button className="nav-cta" onClick={() => openAuth("register")}>Get Started <ArrowRight size={16} /></button>
+          </>}
+        </nav>
+      </header>
+
+      {notice && <div className="notice" role="status">
+        <span>{notice}</span>
+        <button onClick={() => setNotice("")} aria-label="Dismiss"><X size={16} /></button>
+      </div>}
+      {error && <div className="error-banner" role="alert">
+        {error}
+        <button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button>
+      </div>}
+
+      {page === "home" && <main>
+        <section className="hero">
+          <div className="hero-copy">
+            <div className="eyebrow"><Sparkles size={15} /> THE SMARTER WAY TO GET HIRED</div>
+            <h1>Your next career move,<span> powered by AI.</span></h1>
+            <p className="hero-description">Discover opportunities, showcase your skills and prepare for your next role with an intelligent recruitment platform.</p>
+            <div className="hero-actions">
+              <button className="primary-btn" onClick={() => openAuth("register")}>Find your next role <ArrowRight size={18} /></button>
+              <button className="secondary-btn" onClick={() => openAuth("register")}>Hire talent</button>
+            </div>
+            <div className="trust-note"><ShieldCheck size={17} /> Secure accounts · Skill-focused recruitment</div>
+          </div>
+          <div className="hero-art">
+            <div className="orbit orbit-one"></div><div className="orbit orbit-two"></div>
+            <div className="ai-core"><BrainCircuit size={76} strokeWidth={1.3} /><span>AI MATCH</span></div>
+            <div className="float-card float-top"><span className="float-icon purple"><Sparkles size={19} /></span><div><strong>Smart matching</strong><small>Find relevant opportunities</small></div></div>
+            <div className="float-card float-bottom"><span className="float-icon green"><ShieldCheck size={19} /></span><div><strong>Secure by design</strong><small>Protected user accounts</small></div></div>
+          </div>
+        </section>
+        <section className="search-section">
+          <div className="search-heading"><div><span className="section-kicker">YOUR CAREER STARTS HERE</span><h2>What are you looking for?</h2></div></div>
+          <form className="search-box" onSubmit={(event) => {
+            event.preventDefault();
+            openAuth("register");
+            setNotice(search.trim()
+              ? `Your search for "${search}" is ready. Job search will be enabled in the next phase.`
+              : "Create an account to get started.");
+          }}>
+            <Search size={21} />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Job title, skills or company" aria-label="Search jobs" />
+            <button className="primary-btn" type="submit">Explore jobs</button>
+          </form>
+          <p className="search-caption">Job search and live job listings will be connected in the next development phase.</p>
+        </section>
+        <section className="features-section" id="features">
+          <div className="section-heading"><span className="section-kicker">BUILT FOR YOUR GROWTH</span><h2>Recruitment, reimagined.</h2><p>One platform designed for candidates and recruiters.</p></div>
+          <div className="feature-grid">
+            <article className="feature-card"><span className="feature-icon lavender"><Search size={23} /></span><h3>Discover opportunities</h3><p>Search for jobs and explore roles aligned with your career goals and skills.</p></article>
+            <article className="feature-card"><span className="feature-icon mint"><BrainCircuit size={23} /></span><h3>AI-powered matching</h3><p>Compare your resume skills with job requirements and identify skill gaps.</p></article>
+            <article className="feature-card"><span className="feature-icon peach"><Users size={23} /></span><h3>Recruiter workspace</h3><p>Manage job openings and applications through a dedicated recruiter dashboard.</p></article>
+          </div>
+        </section>
+      </main>}
+
+      {page === "auth" && <main className="auth-layout">
+        <section className="auth-aside">
+          <div className="auth-aside-icon"><BrainCircuit size={42} /></div>
+          <span className="section-kicker">WELCOME TO HIREAI</span>
+          <h1>Make your next move<span> count.</span></h1>
+          <p>A smarter recruitment experience begins with your account.</p>
+          <div className="auth-benefit"><ShieldCheck size={19} /> Passwords securely hashed on the server</div>
+          <div className="auth-benefit"><BriefcaseBusiness size={19} /> Separate candidate and recruiter experiences</div>
+        </section>
+        <section className="auth-card">
+          <div className="auth-tabs">
+            <button className={authMode === "login" ? "active" : ""} onClick={() => { setAuthMode("login"); setError(""); }}>Login</button>
+            <button className={authMode === "register" ? "active" : ""} onClick={() => { setAuthMode("register"); setError(""); }}>Create account</button>
+          </div>
+          <h2>{authMode === "login" ? "Welcome back" : "Create your account"}</h2>
+          <p className="auth-subtitle">{authMode === "login" ? "Enter your details to sign in." : "Join the smarter recruitment experience."}</p>
+          <form className="auth-form" onSubmit={submitAuth}>
+            {authMode === "register" && <>
+              <label htmlFor="name">Full name</label>
+              <input id="name" name="name" value={form.name} onChange={updateForm} placeholder="Enter your full name" minLength={2} maxLength={80} required />
+              <label htmlFor="role">I want to</label>
+              <select id="role" name="role" value={form.role} onChange={updateForm}>
+                <option value="candidate">Find a job</option><option value="recruiter">Hire candidates</option>
+              </select>
+            </>}
+            <label htmlFor="email">Email address</label>
+            <input id="email" type="email" name="email" value={form.email} onChange={updateForm} placeholder="you@example.com" autoComplete="email" required />
+            <label htmlFor="password">Password</label>
+            <input id="password" type="password" name="password" value={form.password} onChange={updateForm} placeholder="At least 8 characters" minLength={8} maxLength={72} autoComplete={authMode === "login" ? "current-password" : "new-password"} required />
+            <button className="primary-btn auth-submit" type="submit" disabled={loading}>
+              {loading ? "Please wait..." : authMode === "login" ? "Sign in" : "Create account"}
+              {!loading && <ArrowRight size={18} />}
+            </button>
+          </form>
+          <p className="switch-auth">{authMode === "login" ? "New to HireAI?" : "Already have an account?"}
+            <button onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setError(""); }}>{authMode === "login" ? "Create account" : "Sign in"}</button>
+          </p>
+        </section>
+      </main>}
+
+      {page === "dashboard" && <main className="dashboard">
+        {!isLoggedIn ? <section className="empty-state">
+          <UserRound size={40} /><h2>Loading your account...</h2><p>Your profile is being verified.</p>
+          <button className="secondary-btn" onClick={() => openAuth("login")}>Go to login</button>
+        </section> : <>
+          <div className="dashboard-heading"><div><span className="section-kicker">YOUR WORKSPACE</span><h1>Hello, {user.name}!</h1><p>Welcome to your HireAI dashboard.</p></div><span className="role-pill">{user.role}</span></div>
+          <section className="profile-card">
+            <div className="profile-avatar">{user.name.charAt(0).toUpperCase()}</div>
+            <div className="profile-info"><h2>{user.name}</h2><p>{user.email}</p><span className="role-pill">{user.role}</span></div>
+            <ShieldCheck className="profile-shield" size={27} />
+          </section>
+
+          
+          {user.role === "recruiter" ? (
+            <div className="jobs-dashboard-layout">
+              <section className="job-form-card">
+                <div className="job-section-heading">
+                  <div>
+                    <span className="section-kicker">RECRUITER TOOLS</span>
+                    <h2><Plus size={22} /> Post a new job</h2>
+                    <p>Share an opening with candidates on HireAI.</p>
+                  </div>
+                </div>
+
+                <form className="job-form" onSubmit={submitJob}>
+                  <div className="job-form-row">
+                    <div className="job-field">
+                      <label htmlFor="job-title">Job title *</label>
+                      <input id="job-title" name="title" value={jobForm.title} onChange={updateJobForm} placeholder="e.g. Java Developer" required maxLength={120} />
+                    </div>
+                    <div className="job-field">
+                      <label htmlFor="job-company">Company *</label>
+                      <input id="job-company" name="company" value={jobForm.company} onChange={updateJobForm} placeholder="Company name" required maxLength={120} />
+                    </div>
+                  </div>
+
+                  <div className="job-form-row">
+                    <div className="job-field">
+                      <label htmlFor="job-location">Location</label>
+                      <input id="job-location" name="location" value={jobForm.location} onChange={updateJobForm} placeholder="e.g. Pune / Remote" />
+                    </div>
+                    <div className="job-field">
+                      <label htmlFor="job-type">Employment type</label>
+                      <select id="job-type" name="employmentType" value={jobForm.employmentType} onChange={updateJobForm}>
+                        <option>Full-time</option>
+                        <option>Part-time</option>
+                        <option>Internship</option>
+                        <option>Contract</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="job-field">
+                    <label htmlFor="job-description">Job description *</label>
+                    <textarea id="job-description" name="description" value={jobForm.description} onChange={updateJobForm} placeholder="Describe responsibilities, qualifications and expectations..." rows={5} required />
+                  </div>
+
+                  <div className="job-field">
+                    <label htmlFor="job-skills">Required skills</label>
+                    <input id="job-skills" name="requiredSkills" value={jobForm.requiredSkills} onChange={updateJobForm} placeholder="Java, SQL, React (comma-separated)" />
+                  </div>
+
+                  <div className="job-form-row">
+                    <div className="job-field">
+                      <label htmlFor="job-salary-min">Minimum salary (₹ per year)</label>
+                      <input id="job-salary-min" type="number" min="0" name="salaryMin" value={jobForm.salaryMin} onChange={updateJobForm} placeholder="e.g. 300000" />
+                    </div>
+                    <div className="job-field">
+                      <label htmlFor="job-salary-max">Maximum salary (₹ per year)</label>
+                      <input id="job-salary-max" type="number" min="0" name="salaryMax" value={jobForm.salaryMax} onChange={updateJobForm} placeholder="e.g. 600000" />
+                    </div>
+                  </div>
+
+                  <button className="primary-btn job-submit" type="submit" disabled={jobSubmitting}>
+                    {jobSubmitting ? "Publishing..." : "Publish job"} <ArrowRight size={17} />
+                  </button>
+                </form>
+              </section>
+
+              <section className="posted-jobs-section">
+                <div className="job-section-heading job-list-heading">
+                  <div>
+                    <span className="section-kicker">YOUR OPENINGS</span>
+                    <h2><BriefcaseBusiness size={22} /> My posted jobs</h2>
+                    <p>Jobs you have published from this account.</p>
+                  </div>
+                  <button className="icon-refresh-btn" type="button" aria-label="Refresh jobs" onClick={() => setJobsRefresh((value) => value + 1)}>
+                    <RefreshCw size={17} />
+                  </button>
+                </div>
+
+                {jobsLoading ? (
+                  <div className="jobs-empty-state">Loading your jobs...</div>
+                ) : jobs.length === 0 ? (
+                  <div className="jobs-empty-state">
+                    <BriefcaseBusiness size={30} />
+                    <h3>No jobs posted yet</h3>
+                    <p>Complete the form to publish your first opening.</p>
+                  </div>
+                ) : (
+                  <div className="posted-jobs-list">
+                    {jobs.map((job) => (
+                      <article className="posted-job-card" key={job._id}>
+                        <div className="posted-job-top">
+                          <div>
+                            <h3>{job.title}</h3>
+                            <p>{job.company} · <MapPin size={14} /> {job.location || "Not specified"}</p>
+                          </div>
+                          <span className={`job-status ${job.status}`}>{job.status}</span>
+                        </div>
+
+                        <p className="posted-job-description">{job.description}</p>
+
+                        <button
+                          type="button"
+                          className="secondary-btn"
+                          onClick={() => viewApplicants(job)}
+                        >
+                          <Users size={16} /> View Applicants
+                        </button>
+
+                        {job.requiredSkills?.length > 0 && (
+                          <div className="job-skill-tags">
+                            {job.requiredSkills.map((skill) => <span key={skill}>{skill}</span>)}
+                          </div>
+                        )}
+
+                        <div className="posted-job-meta">
+                          <span>{job.employmentType}</span>
+                          {job.salaryMin != null || job.salaryMax != null ? (
+                            <span>₹{Number(job.salaryMin || 0).toLocaleString("en-IN")} – ₹{Number(job.salaryMax || 0).toLocaleString("en-IN")} / year</span>
+                          ) : (
+                            <span>Salary not specified</span>
+                          )}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {selectedApplicantsJob && (
+                <section className="posted-jobs-section applicants-section" style={{ gridColumn: "1 / -1", width: "100%" }}>
+                  <div className="job-section-heading job-list-heading">
+                    <div>
+                      <span className="section-kicker">APPLICANT MANAGEMENT</span>
+                      <h2><Users size={22} /> Applicants — {selectedApplicantsJob.title}</h2>
+                      <p>{applicants.length} application(s) loaded for this job.</p>
+                    </div>
+                    <button type="button" className="secondary-btn" onClick={() => setSelectedApplicantsJob(null)}>
+                      Close
+                    </button>
+                  </div>
+
+                  {applicantsLoading ? (
+                    <div className="jobs-empty-state">Loading applicants...</div>
+                  ) : applicants.length === 0 ? (
+                    <div className="jobs-empty-state">
+                      <Users size={30} />
+                      <h3>No applicants yet</h3>
+                      <p>Applications for this job will appear here.</p>
+                    </div>
+                  ) : (
+                    <div className="applicants-list">
+                      {applicants.map((application) => (
+                        <article className="posted-job-card" key={application._id}>
+                          <h3>{application.candidate?.name || "Candidate"}</h3>
+                          <p>{application.candidate?.email || "Email unavailable"}</p>
+                          {application.resumeUrl ? (
+  
+<div className="resume-actions">
+  <button
+    type="button"
+    className="secondary-btn"
+    onClick={() => openApplicationResume(application, false)}
+  >
+    <FileText size={16} />
+    View Resume
+  </button>
+
+  <button
+    type="button"
+    className="secondary-btn"
+    onClick={() => openApplicationResume(application, true)}
+  >
+    <Download size={16} />
+    Download Resume
+  </button>
+</div>
+
+) : (
+  <p className="application-error">
+    Resume not available for this application.
+  </p>
+)}
+
+                          <p>
+                            Skills:{" "}
+                            {application.candidate?.skills?.length
+                              ? application.candidate.skills.join(", ")
+                              : "Not provided"}
+                          </p>
+
+                          <p>
+                            Applied:{" "}
+                            {application.createdAt
+                              ? new Date(application.createdAt).toLocaleDateString()
+                              : "Date unavailable"}
+                          </p>
+
+                          <div className="job-field">
+                            <label htmlFor={`status-${application._id}`}>Application status</label>
+                            <select
+                              id={`status-${application._id}`}
+                              value={application.status}
+                              disabled={statusUpdatingId === application._id}
+                              onChange={(event) => updateApplicantStatus(application._id, event.target.value)}
+                            >
+                              <option value="pending">Pending</option>
+                              <option value="reviewing">Reviewing</option>
+                              <option value="shortlisted">Shortlisted</option>
+                              <option value="rejected">Rejected</option>
+                              <option value="accepted">Accepted</option>
+                            </select>
+                            {statusUpdatingId === application._id && <small>Saving status...</small>}
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )}
+            </div>
+          ) : (
+            <section className="candidate-jobs-section">
+              <div className="job-section-heading job-list-heading">
+                <div>
+                  <span className="section-kicker">CAREER OPPORTUNITIES</span>
+                  <h2><BriefcaseBusiness size={22} /> Explore jobs</h2>
+                  <p>Search openings published by recruiters.</p>
+                </div>
+              </div>
+
+              <form className="dashboard-job-search" onSubmit={(event) => event.preventDefault()}>
+                <Search size={19} />
+                <input value={jobSearch} onChange={(event) => setJobSearch(event.target.value)} placeholder="Search by title, company or skills" aria-label="Search available jobs" />
+              </form>
+
+              {jobsLoading ? (
+                <div className="jobs-empty-state">Loading available jobs...</div>
+              ) : jobs.length === 0 ? (
+                <div className="jobs-empty-state">
+                  <BriefcaseBusiness size={30} />
+                  <h3>No matching jobs found</h3>
+                  <p>Try another keyword or check again later.</p>
+                </div>
+              ) : (
+                <div className="candidate-jobs-grid">
+                  {jobs.map((job) => (
+                    <article className="posted-job-card" key={job._id}>
+                      <h3>{job.title}</h3>
+                      <p>{job.company} · <MapPin size={14} /> {job.location || "Not specified"}</p>
+                      <p className="posted-job-description">{job.description}</p>
+
+                      {job.requiredSkills?.length > 0 && (
+                        <div className="job-skill-tags">
+                          {job.requiredSkills.map((skill) => <span key={skill}>{skill}</span>)}
+                        </div>
+                      )}
+
+                      <div className="posted-job-meta">
+                        <span>{job.employmentType}</span>
+                        {job.salaryMin != null || job.salaryMax != null ? (
+                          <span>₹{Number(job.salaryMin || 0).toLocaleString("en-IN")} – ₹{Number(job.salaryMax || 0).toLocaleString("en-IN")} / year</span>
+                        ) : (
+                          <span>Salary not specified</span>
+                        )}
+                      </div>
+
+                      <button type="button" className="primary-btn apply-job-btn" onClick={() => {
+                        setSelectedJob(job);
+                        setResumeFile(null);
+                        setCoverLetter("");
+                        setApplicationError("");
+                        setNotice("");
+                        setError("");
+                      }}>
+                        Apply Now <ArrowRight size={16} />
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          
+          )}
+
+          <div className="dashboard-grid dashboard-secondary-grid">
+            <article className="dashboard-card">
+              <span className="feature-icon mint">
+                <BrainCircuit size={23} />
+              </span>
+              <h3>AI career assistant</h3>
+              <p>
+                Resume analysis, skill matching and personalized suggestions
+                will be integrated in the AI phase.
+              </p>
+              <span className="coming-soon">Planned feature</span>
+            </article>
+          </div>
+
+          <button
+            className="secondary-btn dashboard-logout"
+            onClick={logout}
+          >
+            <LogOut size={17} /> Log out
+          </button>
+        </>}
+      </main>}
+
+      {selectedJob && (
+        <div
+          className="application-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !applicationSubmitting) {
+              setSelectedJob(null);
+              setResumeFile(null);
+              setCoverLetter("");
+              setApplicationError("");
+            }
+          }}
+        >
+          <section
+            className="application-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="application-modal-title"
+          >
+            <div className="job-section-heading">
+              <div>
+                <span className="section-kicker">JOB APPLICATION</span>
+                <h2 id="application-modal-title">Apply for {selectedJob.title}</h2>
+                <p>{selectedJob.company}</p>
+              </div>
+              <button
+                type="button"
+                className="icon-refresh-btn"
+                aria-label="Close application form"
+                disabled={applicationSubmitting}
+                onClick={() => {
+                  setSelectedJob(null);
+                  setResumeFile(null);
+                  setCoverLetter("");
+                  setApplicationError("");
+                }}
+              >
+                <X size={19} />
+              </button>
+            </div>
+
+            <form className="job-form" onSubmit={submitApplication}>
+              <div className="job-field">
+                <label htmlFor="application-resume">Resume (PDF, DOC, or DOCX; max 5 MB) *</label>
+                <input
+                  id="application-resume"
+                  type="file"
+                  accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  required
+                  onChange={(event) => {
+                    setResumeFile(event.target.files?.[0] || null);
+                    setApplicationError("");
+                  }}
+                />
+                {resumeFile && <small>Selected file: {resumeFile.name}</small>}
+              </div>
+
+              <div className="job-field">
+                <label htmlFor="application-cover-letter">Cover letter (optional)</label>
+                <textarea
+                  id="application-cover-letter"
+                  value={coverLetter}
+                  onChange={(event) => setCoverLetter(event.target.value)}
+                  placeholder="Briefly explain why you are a good fit for this role."
+                  rows={5}
+                  maxLength={5000}
+                />
+              </div>
+
+              {applicationError && <div className="error-banner" role="alert">{applicationError}</div>}
+
+              <div className="hero-actions">
+                <button className="primary-btn" type="submit" disabled={applicationSubmitting}>
+                  {applicationSubmitting ? "Submitting..." : "Submit application"}
+                  {!applicationSubmitting && <ArrowRight size={17} />}
+                </button>
+                <button
+                  className="secondary-btn"
+                  type="button"
+                  disabled={applicationSubmitting}
+                  onClick={() => {
+                    setSelectedJob(null);
+                    setResumeFile(null);
+                    setCoverLetter("");
+                    setApplicationError("");
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      <footer className="site-footer">
+        <span>© {new Date().getFullYear()} HireAI</span>
+        <span>Smarter recruitment, better opportunities.</span>
+      </footer>
+    </div>
+  );
+}
+
+export default App;

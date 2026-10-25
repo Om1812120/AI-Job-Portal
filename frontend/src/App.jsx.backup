@@ -1,0 +1,1238 @@
+
+import { useEffect, useState } from "react";
+import {
+  Search,
+  BriefcaseBusiness,
+  Users,
+  BrainCircuit,
+  ArrowRight,
+  LogOut,
+  UserRound,
+  MapPin,
+  Sparkles,
+  ShieldCheck,
+  Menu,
+  X,
+  Plus,
+  RefreshCw
+} from "lucide-react";
+import api from "./api";
+import "./styles.css";
+
+const TOKEN_KEY = "ai_job_portal_token";
+
+function App() {
+  const [page, setPage] = useState("home");
+  const [authMode, setAuthMode] = useState("login");
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const [token, setToken] = useState(
+    () => localStorage.getItem(TOKEN_KEY) || ""
+  );
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+
+  const [jobs, setJobs] = useState([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobsRefresh, setJobsRefresh] = useState(0);
+  const [jobSearch, setJobSearch] = useState("");
+
+  const [recommendations, setRecommendations] = useState([]);
+  const [recommendationsLoading, setRecommendationsLoading] =
+    useState(false);
+  const [recommendationsError, setRecommendationsError] = useState("");
+
+  const [jobSubmitting, setJobSubmitting] = useState(false);
+
+  const [jobForm, setJobForm] = useState({
+    title: "",
+    company: "",
+    location: "",
+    description: "",
+    requiredSkills: "",
+    employmentType: "Full-time",
+    salaryMin: "",
+    salaryMax: ""
+  });
+
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    role: "candidate"
+  });
+
+  const isLoggedIn = Boolean(token && user);
+
+  // Verify logged-in user
+  useEffect(() => {
+    if (!token) {
+      setUser(null);
+      return;
+    }
+
+    let active = true;
+
+    api.get("/auth/me")
+      .then((response) => {
+        if (active) {
+          setUser(response.data.user);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          localStorage.removeItem(TOKEN_KEY);
+          setToken("");
+          setUser(null);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [token]);
+
+  function updateForm(event) {
+    setForm((current) => ({
+      ...current,
+      [event.target.name]: event.target.value
+    }));
+  }
+
+  function openAuth(mode) {
+    setAuthMode(mode);
+    setPage("auth");
+    setError("");
+    setNotice("");
+    setMobileMenu(false);
+  }
+
+  async function submitAuth(event) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    setLoading(true);
+
+    try {
+      const endpoint =
+        authMode === "register"
+          ? "/auth/register"
+          : "/auth/login";
+
+      const payload =
+        authMode === "register"
+          ? form
+          : {
+              email: form.email,
+              password: form.password
+            };
+
+      const response = await api.post(endpoint, payload);
+      const receivedToken = response.data.token;
+
+      localStorage.setItem(TOKEN_KEY, receivedToken);
+      setToken(receivedToken);
+      setUser(response.data.user);
+      setNotice(response.data.message || "Success");
+      setPage("dashboard");
+
+      setForm({
+        name: "",
+        email: "",
+        password: "",
+        role: "candidate"
+      });
+    } catch (err) {
+      setError(
+        err.response?.data?.message ||
+          "Unable to connect. Check whether the backend is running."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Load jobs for the current dashboard
+  useEffect(() => {
+    if (page !== "dashboard" || !isLoggedIn || !user) {
+      return;
+    }
+
+    let active = true;
+    setJobsLoading(true);
+
+    const endpoint =
+      user.role === "recruiter"
+        ? "/jobs/mine/posted"
+        : `/jobs${
+            jobSearch.trim()
+              ? `?search=${encodeURIComponent(jobSearch.trim())}`
+              : ""
+          }`;
+
+    api.get(endpoint)
+      .then((response) => {
+        if (active) {
+          setJobs(response.data.jobs || []);
+        }
+      })
+      .catch((err) => {
+        if (active) {
+          setError(
+            err.response?.data?.message ||
+              "Could not load jobs. Please check the backend."
+          );
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setJobsLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [page, isLoggedIn, user, token, jobSearch, jobsRefresh]);
+
+  // Load personalized recommendations for candidates
+  useEffect(() => {
+    if (
+      page !== "dashboard" ||
+      !isLoggedIn ||
+      !user ||
+      user.role !== "candidate"
+    ) {
+      setRecommendations([]);
+      setRecommendationsError("");
+      setRecommendationsLoading(false);
+      return;
+    }
+
+    let active = true;
+
+    async function loadRecommendations() {
+      setRecommendationsLoading(true);
+      setRecommendationsError("");
+
+      try {
+        const response = await api.get("/jobs/recommended");
+
+        if (active) {
+          setRecommendations(
+            response.data.recommendations || []
+          );
+        }
+      } catch (err) {
+        if (active) {
+          setRecommendationsError(
+            err.response?.data?.message ||
+              "Could not load recommended jobs."
+          );
+        }
+      } finally {
+        if (active) {
+          setRecommendationsLoading(false);
+        }
+      }
+    }
+
+    loadRecommendations();
+
+    return () => {
+      active = false;
+    };
+  }, [page, isLoggedIn, user, token, jobsRefresh]);
+
+  function updateJobForm(event) {
+    setJobForm((current) => ({
+      ...current,
+      [event.target.name]: event.target.value
+    }));
+  }
+
+  async function submitJob(event) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    setJobSubmitting(true);
+
+    try {
+      const payload = {
+        ...jobForm,
+        requiredSkills: jobForm.requiredSkills
+          .split(",")
+          .map((skill) => skill.trim())
+          .filter(Boolean),
+        salaryMin: jobForm.salaryMin,
+        salaryMax: jobForm.salaryMax
+      };
+
+      const response = await api.post("/jobs", payload);
+
+      setNotice(
+        response.data.message || "Job posted successfully."
+      );
+
+      setJobForm({
+        title: "",
+        company: "",
+        location: "",
+        description: "",
+        requiredSkills: "",
+        employmentType: "Full-time",
+        salaryMin: "",
+        salaryMax: ""
+      });
+
+      setJobsRefresh((value) => value + 1);
+    } catch (err) {
+      setError(
+        err.response?.data?.message ||
+          "Could not post job. Please try again."
+      );
+    } finally {
+      setJobSubmitting(false);
+    }
+  }
+
+  function logout() {
+    localStorage.removeItem(TOKEN_KEY);
+    setToken("");
+    setUser(null);
+    setPage("home");
+    setNotice("You have logged out.");
+    setError("");
+    setRecommendations([]);
+    setJobs([]);
+  }
+
+  function goHome() {
+    setPage("home");
+    setMobileMenu(false);
+    setError("");
+  }
+
+  function refreshJobs() {
+    setJobsRefresh((value) => value + 1);
+  }
+
+  function renderJobSalary(job) {
+    if (job.salaryMin == null && job.salaryMax == null) {
+      return <span>Salary not specified</span>;
+    }
+
+    return (
+      <span>
+        ₹{Number(job.salaryMin || 0).toLocaleString("en-IN")}
+        {" – "}
+        ₹{Number(job.salaryMax || 0).toLocaleString("en-IN")}
+        {" / year"}
+      </span>
+    );
+  }
+
+  function renderJobSkills(skills) {
+    if (!Array.isArray(skills) || skills.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className="job-skill-tags">
+        {skills.map((skill, index) => (
+          <span key={`${skill}-${index}`}>{skill}</span>
+        ))}
+      </div>
+    );
+  }
+
+  function renderJobCard(job, recommended = false) {
+    const score =
+      job.recommendationScore ?? job.matchScore ?? 0;
+
+    return (
+      <article
+        className={`posted-job-card ${
+          recommended ? "recommended-job-card" : ""
+        }`}
+        key={job._id}
+      >
+        <h3>{job.title}</h3>
+
+        <p>
+          {job.company} · <MapPin size={14} />{" "}
+          {job.location || "Not specified"}
+        </p>
+
+        {recommended && (
+          <span className="role-pill">
+            {Number(score)}% match
+          </span>
+        )}
+
+        <p className="posted-job-description">
+          {job.description}
+        </p>
+
+        {renderJobSkills(job.requiredSkills)}
+
+        {recommended &&
+          Array.isArray(job.matchedSkills) &&
+          job.matchedSkills.length > 0 && (
+            <>
+              <p><strong>Matching skills</strong></p>
+              {renderJobSkills(job.matchedSkills)}
+            </>
+          )}
+
+        {recommended &&
+          Array.isArray(job.missingSkills) &&
+          job.missingSkills.length > 0 && (
+            <p>
+              <strong>Skills to build:</strong>{" "}
+              {job.missingSkills.join(", ")}
+            </p>
+          )}
+
+        <div className="posted-job-meta">
+          <span>{job.employmentType || "Employment type not specified"}</span>
+          {renderJobSalary(job)}
+        </div>
+      </article>
+    );
+  }
+
+  return (
+    <div className="app-shell">
+      <header className="navbar">
+        <button className="brand" onClick={goHome}>
+          <span className="brand-icon">
+            <BrainCircuit size={24} />
+          </span>
+          <span>
+            Hire<span className="brand-accent">AI</span>
+          </span>
+        </button>
+
+        <button
+          className="mobile-toggle"
+          onClick={() => setMobileMenu((value) => !value)}
+          aria-label="Toggle navigation"
+        >
+          {mobileMenu ? <X /> : <Menu />}
+        </button>
+
+        <nav className={mobileMenu ? "nav-links open" : "nav-links"}>
+          <button onClick={goHome}>Home</button>
+
+          <button
+            onClick={() => {
+              setPage("home");
+              setMobileMenu(false);
+              document.getElementById("features")?.scrollIntoView({
+                behavior: "smooth"
+              });
+            }}
+          >
+            Features
+          </button>
+
+          {isLoggedIn ? (
+            <>
+              <button
+                onClick={() => {
+                  setPage("dashboard");
+                  setMobileMenu(false);
+                }}
+              >
+                Dashboard
+              </button>
+
+              <button className="nav-logout" onClick={logout}>
+                <LogOut size={16} /> Logout
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => openAuth("login")}>
+                Login
+              </button>
+
+              <button
+                className="nav-cta"
+                onClick={() => openAuth("register")}
+              >
+                Get Started <ArrowRight size={16} />
+              </button>
+            </>
+          )}
+        </nav>
+      </header>
+
+      {notice && (
+        <div className="notice" role="status">
+          {notice}
+          <button
+            onClick={() => setNotice("")}
+            aria-label="Dismiss notice"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {error && (
+        <div className="error-banner" role="alert">
+          {error}
+          <button
+            onClick={() => setError("")}
+            aria-label="Dismiss error"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {/* Home Page */}
+      {page === "home" && (
+        <main>
+          <section className="hero">
+            <div className="hero-copy">
+              <div className="eyebrow">
+                <Sparkles size={15} /> THE SMARTER WAY TO GET HIRED
+              </div>
+
+              <h1>
+                Your next career move,
+                <span> powered by AI.</span>
+              </h1>
+
+              <p className="hero-description">
+                Discover opportunities, showcase your skills and
+                prepare for your next role with an intelligent
+                recruitment platform.
+              </p>
+
+              <div className="hero-actions">
+                <button
+                  className="primary-btn"
+                  onClick={() => openAuth("register")}
+                >
+                  Find your next role <ArrowRight size={18} />
+                </button>
+
+                <button
+                  className="secondary-btn"
+                  onClick={() => openAuth("register")}
+                >
+                  Hire talent
+                </button>
+              </div>
+
+              <div className="trust-note">
+                <ShieldCheck size={17} />
+                Secure accounts · Skill-focused recruitment
+              </div>
+            </div>
+
+            <div className="hero-art">
+              <div className="orbit orbit-one"></div>
+              <div className="orbit orbit-two"></div>
+
+              <div className="ai-core">
+                <BrainCircuit size={76} strokeWidth={1.3} />
+                <span>AI MATCH</span>
+              </div>
+
+              <div className="float-card float-top">
+                <span className="float-icon purple">
+                  <Sparkles size={19} />
+                </span>
+                <div>
+                  <strong>Smart matching</strong>
+                  <small>Find relevant opportunities</small>
+                </div>
+              </div>
+
+              <div className="float-card float-bottom">
+                <span className="float-icon green">
+                  <ShieldCheck size={19} />
+                </span>
+                <div>
+                  <strong>Secure by design</strong>
+                  <small>Protected user accounts</small>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="search-section">
+            <div className="search-heading">
+              <div>
+                <span className="section-kicker">
+                  YOUR CAREER STARTS HERE
+                </span>
+                <h2>What are you looking for?</h2>
+              </div>
+            </div>
+
+            <form
+              className="search-box"
+              onSubmit={(event) => {
+                event.preventDefault();
+                openAuth("register");
+                setNotice(
+                  search.trim()
+                    ? `Your search for "${search}" is ready. Create an account to explore jobs.`
+                    : "Create an account to get started."
+                );
+              }}
+            >
+              <Search size={21} />
+
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Job title, skills or company"
+                aria-label="Search jobs"
+              />
+
+              <button className="primary-btn" type="submit">
+                Explore jobs
+              </button>
+            </form>
+
+            <p className="search-caption">
+              Create an account to explore available opportunities.
+            </p>
+          </section>
+
+          <section className="features-section" id="features">
+            <div className="section-heading">
+              <span className="section-kicker">BUILT FOR YOUR GROWTH</span>
+              <h2>Recruitment, reimagined.</h2>
+              <p>
+                One platform designed for candidates and recruiters.
+              </p>
+            </div>
+
+            <div className="feature-grid">
+              <article className="feature-card">
+                <span className="feature-icon lavender">
+                  <Search size={23} />
+                </span>
+                <h3>Discover opportunities</h3>
+                <p>
+                  Search for jobs and explore roles aligned with your
+                  career goals and skills.
+                </p>
+              </article>
+
+              <article className="feature-card">
+                <span className="feature-icon mint">
+                  <BrainCircuit size={23} />
+                </span>
+                <h3>AI-powered matching</h3>
+                <p>
+                  Compare your skills with job requirements and
+                  identify areas to improve.
+                </p>
+              </article>
+
+              <article className="feature-card">
+                <span className="feature-icon peach">
+                  <Users size={23} />
+                </span>
+                <h3>Recruiter workspace</h3>
+                <p>
+                  Publish job openings and manage your recruitment
+                  workflow through a dedicated dashboard.
+                </p>
+              </article>
+            </div>
+          </section>
+        </main>
+      )}
+
+      {/* Login and Registration */}
+      {page === "auth" && (
+        <main className="auth-layout">
+          <section className="auth-aside">
+            <div className="auth-aside-icon">
+              <BrainCircuit size={42} />
+            </div>
+
+            <span className="section-kicker">WELCOME TO HIREAI</span>
+
+            <h1>
+              Make your next move
+              <span> count.</span>
+            </h1>
+
+            <p>
+              A smarter recruitment experience begins with your account.
+            </p>
+
+            <div className="auth-benefit">
+              <ShieldCheck size={19} />
+              Passwords securely hashed on the server
+            </div>
+
+            <div className="auth-benefit">
+              <BriefcaseBusiness size={19} />
+              Separate candidate and recruiter experiences
+            </div>
+          </section>
+
+          <section className="auth-card">
+            <div className="auth-tabs">
+              <button
+                className={authMode === "login" ? "active" : ""}
+                onClick={() => {
+                  setAuthMode("login");
+                  setError("");
+                }}
+              >
+                Login
+              </button>
+
+              <button
+                className={authMode === "register" ? "active" : ""}
+                onClick={() => {
+                  setAuthMode("register");
+                  setError("");
+                }}
+              >
+                Create account
+              </button>
+            </div>
+
+            <h2>
+              {authMode === "login"
+                ? "Welcome back"
+                : "Create your account"}
+            </h2>
+
+            <p className="auth-subtitle">
+              {authMode === "login"
+                ? "Enter your details to sign in."
+                : "Join the smarter recruitment experience."}
+            </p>
+
+            <form className="auth-form" onSubmit={submitAuth}>
+              {authMode === "register" && (
+                <>
+                  <label htmlFor="name">Full name</label>
+                  <input
+                    id="name"
+                    name="name"
+                    value={form.name}
+                    onChange={updateForm}
+                    placeholder="Enter your full name"
+                    minLength={2}
+                    maxLength={80}
+                    required
+                  />
+
+                  <label htmlFor="role">I want to</label>
+                  <select
+                    id="role"
+                    name="role"
+                    value={form.role}
+                    onChange={updateForm}
+                  >
+                    <option value="candidate">Find a job</option>
+                    <option value="recruiter">Hire candidates</option>
+                  </select>
+                </>
+              )}
+
+              <label htmlFor="email">Email address</label>
+              <input
+                id="email"
+                type="email"
+                name="email"
+                value={form.email}
+                onChange={updateForm}
+                placeholder="you@example.com"
+                autoComplete="email"
+                required
+              />
+
+              <label htmlFor="password">Password</label>
+              <input
+                id="password"
+                type="password"
+                name="password"
+                value={form.password}
+                onChange={updateForm}
+                placeholder="At least 8 characters"
+                minLength={8}
+                maxLength={72}
+                autoComplete={
+                  authMode === "login"
+                    ? "current-password"
+                    : "new-password"
+                }
+                required
+              />
+
+              <button
+                className="primary-btn auth-submit"
+                type="submit"
+                disabled={loading}
+              >
+                {loading
+                  ? "Please wait..."
+                  : authMode === "login"
+                    ? "Sign in"
+                    : "Create account"}
+
+                {!loading && <ArrowRight size={18} />}
+              </button>
+            </form>
+
+            <p className="switch-auth">
+              {authMode === "login"
+                ? "New to HireAI?"
+                : "Already have an account?"}
+
+              <button
+                onClick={() => {
+                  setAuthMode(
+                    authMode === "login" ? "register" : "login"
+                  );
+                  setError("");
+                }}
+              >
+                {authMode === "login"
+                  ? "Create account"
+                  : "Sign in"}
+              </button>
+            </p>
+          </section>
+        </main>
+      )}
+
+      {/* Dashboard */}
+      {page === "dashboard" && (
+        <main className="dashboard">
+          {!isLoggedIn ? (
+            <section className="empty-state">
+              <UserRound size={40} />
+              <h2>Loading your account...</h2>
+              <p>Your profile is being verified.</p>
+
+              <button
+                className="secondary-btn"
+                onClick={() => openAuth("login")}
+              >
+                Go to login
+              </button>
+            </section>
+          ) : (
+            <>
+              <div className="dashboard-heading">
+                <div>
+                  <span className="section-kicker">YOUR WORKSPACE</span>
+                  <h1>Hello, {user.name}!</h1>
+                  <p>Welcome to your HireAI dashboard.</p>
+                </div>
+
+                <span className="role-pill">{user.role}</span>
+              </div>
+
+              <section className="profile-card">
+                <div className="profile-avatar">
+                  {(user.name || "U").charAt(0).toUpperCase()}
+                </div>
+
+                <div className="profile-info">
+                  <h2>{user.name}</h2>
+                  <p>{user.email}</p>
+                  <span className="role-pill">{user.role}</span>
+                </div>
+
+                <ShieldCheck className="profile-shield" size={27} />
+              </section>
+
+              {/* Recruiter Dashboard */}
+              {user.role === "recruiter" ? (
+                <div className="jobs-dashboard-layout">
+                  <section className="job-form-card">
+                    <div className="job-section-heading">
+                      <div>
+                        <span className="section-kicker">
+                          RECRUITER TOOLS
+                        </span>
+                        <h2>
+                          <Plus size={22} /> Post a new job
+                        </h2>
+                        <p>
+                          Share an opening with candidates on HireAI.
+                        </p>
+                      </div>
+                    </div>
+
+                    <form className="job-form" onSubmit={submitJob}>
+                      <div className="job-form-row">
+                        <div className="job-field">
+                          <label htmlFor="job-title">Job title *</label>
+                          <input
+                            id="job-title"
+                            name="title"
+                            value={jobForm.title}
+                            onChange={updateJobForm}
+                            placeholder="e.g. Java Developer"
+                            required
+                            maxLength={120}
+                          />
+                        </div>
+
+                        <div className="job-field">
+                          <label htmlFor="job-company">Company *</label>
+                          <input
+                            id="job-company"
+                            name="company"
+                            value={jobForm.company}
+                            onChange={updateJobForm}
+                            placeholder="Company name"
+                            required
+                            maxLength={120}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="job-form-row">
+                        <div className="job-field">
+                          <label htmlFor="job-location">Location</label>
+                          <input
+                            id="job-location"
+                            name="location"
+                            value={jobForm.location}
+                            onChange={updateJobForm}
+                            placeholder="e.g. Pune / Remote"
+                          />
+                        </div>
+
+                        <div className="job-field">
+                          <label htmlFor="job-type">Employment type</label>
+                          <select
+                            id="job-type"
+                            name="employmentType"
+                            value={jobForm.employmentType}
+                            onChange={updateJobForm}
+                          >
+                            <option>Full-time</option>
+                            <option>Part-time</option>
+                            <option>Internship</option>
+                            <option>Contract</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="job-field">
+                        <label htmlFor="job-description">
+                          Job description *
+                        </label>
+                        <textarea
+                          id="job-description"
+                          name="description"
+                          value={jobForm.description}
+                          onChange={updateJobForm}
+                          placeholder="Describe responsibilities, qualifications and expectations..."
+                          rows={5}
+                          required
+                        />
+                      </div>
+
+                      <div className="job-field">
+                        <label htmlFor="job-skills">Required skills</label>
+                        <input
+                          id="job-skills"
+                          name="requiredSkills"
+                          value={jobForm.requiredSkills}
+                          onChange={updateJobForm}
+                          placeholder="Java, SQL, React (comma-separated)"
+                        />
+                      </div>
+
+                      <div className="job-form-row">
+                        <div className="job-field">
+                          <label htmlFor="job-salary-min">
+                            Minimum salary (₹ per year)
+                          </label>
+                          <input
+                            id="job-salary-min"
+                            type="number"
+                            min="0"
+                            name="salaryMin"
+                            value={jobForm.salaryMin}
+                            onChange={updateJobForm}
+                            placeholder="e.g. 300000"
+                          />
+                        </div>
+
+                        <div className="job-field">
+                          <label htmlFor="job-salary-max">
+                            Maximum salary (₹ per year)
+                          </label>
+                          <input
+                            id="job-salary-max"
+                            type="number"
+                            min="0"
+                            name="salaryMax"
+                            value={jobForm.salaryMax}
+                            onChange={updateJobForm}
+                            placeholder="e.g. 600000"
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        className="primary-btn job-submit"
+                        type="submit"
+                        disabled={jobSubmitting}
+                      >
+                        {jobSubmitting ? "Publishing..." : "Publish job"}
+                        <ArrowRight size={17} />
+                      </button>
+                    </form>
+                  </section>
+
+                  {/* Recruiter's posted jobs */}
+                  <section className="posted-jobs-section">
+                    <div className="job-section-heading job-list-heading">
+                      <div>
+                        <span className="section-kicker">YOUR OPENINGS</span>
+                        <h2>
+                          <BriefcaseBusiness size={22} /> My posted jobs
+                        </h2>
+                        <p>
+                          Jobs you have published from this account.
+                        </p>
+                      </div>
+
+                      <button
+                        className="icon-refresh-btn"
+                        type="button"
+                        aria-label="Refresh jobs"
+                        onClick={refreshJobs}
+                      >
+                        <RefreshCw size={17} />
+                      </button>
+                    </div>
+
+                    {jobsLoading ? (
+                      <div className="jobs-empty-state">
+                        Loading your jobs...
+                      </div>
+                    ) : jobs.length === 0 ? (
+                      <div className="jobs-empty-state">
+                        <BriefcaseBusiness size={30} />
+                        <h3>No jobs posted yet</h3>
+                        <p>
+                          Complete the form to publish your first opening.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="posted-jobs-list">
+                        {jobs.map((job) => (
+                          <article
+                            className="posted-job-card"
+                            key={job._id}
+                          >
+                            <div className="posted-job-top">
+                              <div>
+                                <h3>{job.title}</h3>
+                                <p>
+                                  {job.company} ·{" "}
+                                  <MapPin size={14} />{" "}
+                                  {job.location || "Not specified"}
+                                </p>
+                              </div>
+
+                              <span
+                                className={`job-status ${
+                                  job.status || "active"
+                                }`}
+                              >
+                                {job.status || "active"}
+                              </span>
+                            </div>
+
+                            <p className="posted-job-description">
+                              {job.description}
+                            </p>
+
+                            {renderJobSkills(job.requiredSkills)}
+
+                            <div className="posted-job-meta">
+                              <span>
+                                {job.employmentType || "Not specified"}
+                              </span>
+                              {renderJobSalary(job)}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                </div>
+              ) : (
+                <>
+                  {/* Recommended Jobs */}
+                  <section className="candidate-jobs-section recommended-jobs-section">
+                    <div className="job-section-heading job-list-heading">
+                      <div>
+                        <span className="section-kicker">
+                          PERSONALIZED FOR YOU
+                        </span>
+                        <h2>
+                          <Sparkles size={22} /> Recommended Jobs
+                        </h2>
+                        <p>Jobs matched to your skills and profile.</p>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="icon-refresh-btn"
+                        aria-label="Refresh recommendations"
+                        onClick={refreshJobs}
+                      >
+                        <RefreshCw size={17} />
+                      </button>
+                    </div>
+
+                    {recommendationsLoading ? (
+                      <div className="jobs-empty-state">
+                        Finding jobs that match your skills...
+                      </div>
+                    ) : recommendationsError ? (
+                      <div className="jobs-empty-state" role="alert">
+                        {recommendationsError}
+                      </div>
+                    ) : recommendations.length === 0 ? (
+                      <div className="jobs-empty-state">
+                        <Sparkles size={30} />
+                        <h3>No recommendations yet</h3>
+                        <p>
+                          Recommendations will appear when matching jobs
+                          are available.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="candidate-jobs-grid">
+                        {recommendations.map((job) =>
+                          renderJobCard(job, true)
+                        )}
+                      </div>
+                    )}
+                  </section>
+
+                  {/* Explore Jobs */}
+                  <section className="candidate-jobs-section">
+                    <div className="job-section-heading job-list-heading">
+                      <div>
+                        <span className="section-kicker">
+                          CAREER OPPORTUNITIES
+                        </span>
+                        <h2>
+                          <BriefcaseBusiness size={22} /> Explore jobs
+                        </h2>
+                        <p>
+                          Search openings published by recruiters.
+                        </p>
+                      </div>
+
+                      <button
+                        className="icon-refresh-btn"
+                        type="button"
+                        aria-label="Refresh available jobs"
+                        onClick={refreshJobs}
+                      >
+                        <RefreshCw size={17} />
+                      </button>
+                    </div>
+
+                    <form
+                      className="dashboard-job-search"
+                      onSubmit={(event) => event.preventDefault()}
+                    >
+                      <Search size={19} />
+
+                      <input
+                        value={jobSearch}
+                        onChange={(event) => setJobSearch(event.target.value)}
+                        placeholder="Search by title, company or skills"
+                        aria-label="Search available jobs"
+                      />
+                    </form>
+
+                    {jobsLoading ? (
+                      <div className="jobs-empty-state">
+                        Loading available jobs...
+                      </div>
+                    ) : jobs.length === 0 ? (
+                      <div className="jobs-empty-state">
+                        <BriefcaseBusiness size={30} />
+                        <h3>No matching jobs found</h3>
+                        <p>
+                          Try another keyword or check again later.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="candidate-jobs-grid">
+                        {jobs.map((job) => renderJobCard(job))}
+                      </div>
+                    )}
+                  </section>
+                </>
+              )}
+
+              {/* Dashboard feature cards */}
+              <div className="dashboard-grid dashboard-secondary-grid">
+                <article className="dashboard-card">
+                  <span className="feature-icon mint">
+                    <BrainCircuit size={23} />
+                  </span>
+                  <h3>AI career assistant</h3>
+                  <p>
+                    Resume analysis, skill matching and personalized
+                    suggestions can be integrated in the AI phase.
+                  </p>
+                  <span className="coming-soon">Planned feature</span>
+                </article>
+              </div>
+
+              <button
+                className="secondary-btn dashboard-logout"
+                onClick={logout}
+              >
+                <LogOut size={17} /> Log out
+              </button>
+            </>
+          )}
+        </main>
+      )}
+
+      <footer className="footer">
+        <button className="brand footer-brand" onClick={goHome}>
+          <span className="brand-icon">
+            <BrainCircuit size={20} />
+          </span>
+          <span>
+            Hire<span className="brand-accent">AI</span>
+          </span>
+        </button>
+
+        <p>Smarter connections. Better opportunities.</p>
+        <span>AI-Powered Job Portal · 2026–2027</span>
+      </footer>
+    </div>
+  );
+}
+
+export default App;

@@ -1,0 +1,265 @@
+
+const express = require("express");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+const crypto = require("crypto");
+
+const Application = require("../models/Application");
+const Job = require("../models/Job");
+const { protect, authorize } = require("../middleware/auth");
+
+const router = express.Router();
+
+const uploadDir = path.join(__dirname, "../../uploads");
+
+fs.mkdirSync(uploadDir, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const extension = path.extname(file.originalname).toLowerCase();
+    cb(null, `${crypto.randomUUID()}${extension}`);
+  }
+});
+
+const fileFilter = (req, file, cb) => {
+  const allowedExtensions = [".pdf", ".doc", ".docx"];
+  const extension = path.extname(file.originalname).toLowerCase();
+
+  if (!allowedExtensions.includes(extension)) {
+    return cb(new Error("Only PDF, DOC, and DOCX resumes are allowed."));
+  }
+
+  cb(null, true);
+};
+
+const upload = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }
+});
+
+// Candidate applies for a job
+router.post(
+  "/:jobId",
+  protect,
+  authorize("candidate"),
+  (req, res, next) => {
+    upload.single("resume")(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({
+          message:
+            err.code === "LIMIT_FILE_SIZE"
+              ? "Resume must be 5 MB or smaller."
+              : err.message
+        });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    let uploadedFilePath;
+
+    try {
+      if (req.file) {
+        uploadedFilePath = req.file.path;
+      }
+
+      const { jobId } = req.params;
+      const coverLetter = (req.body.coverLetter || "").trim();
+
+      if (!req.file) {
+        return res.status(400).json({
+          message: "Please upload your resume."
+        });
+      }
+
+      if (coverLetter.length > 5000) {
+        return res.status(400).json({
+          message: "Cover letter cannot exceed 5000 characters."
+        });
+      }
+
+      if (!/^[a-f\d]{24}$/i.test(jobId)) {
+        return res.status(400).json({ message: "Invalid job ID." });
+      }
+
+      const job = await Job.findById(jobId);
+
+      if (!job) {
+        return res.status(404).json({ message: "Job not found." });
+      }
+
+      if (job.status !== "open") {
+        return res.status(400).json({
+          message: "This job is no longer accepting applications."
+        });
+      }
+
+      const application = await Application.create({
+        candidate: req.user.id,
+        job: job._id,
+        resumeUrl: `/uploads/${req.file.filename}`,
+        coverLetter
+      });
+
+      return res.status(201).json({
+        message: "Application submitted successfully.",
+        application
+      });
+    } catch (error) {
+      if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
+        fs.unlinkSync(uploadedFilePath);
+      }
+
+      if (error.code === 11000) {
+        return res.status(409).json({
+          message: "You have already applied for this job."
+        });
+      }
+
+      console.error("Application submission error:", error.message);
+      return res.status(500).json({
+        message: "Unable to submit application right now."
+      });
+    }
+  }
+);
+
+// Candidate views their own applications
+router.get(
+  "/mine",
+  protect,
+  authorize("candidate"),
+  async (req, res) => {
+    try {
+      const applications = await Application.find({
+        candidate: req.user.id
+      })
+        .populate("job", "title company location employmentType status")
+        .sort({ createdAt: -1 });
+
+      res.json({
+        count: applications.length,
+        applications
+      });
+    } catch (error) {
+      console.error("Fetch applications error:", error.message);
+      res.status(500).json({
+        message: "Unable to fetch your applications."
+      });
+    }
+  }
+);
+
+// Recruiter views applications for their own job
+router.get(
+  "/job/:jobId",
+  protect,
+  authorize("recruiter"),
+  async (req, res) => {
+    try {
+      if (!/^[a-f\d]{24}$/i.test(req.params.jobId)) {
+        return res.status(400).json({ message: "Invalid job ID." });
+      }
+
+      const job = await Job.findOne({
+        _id: req.params.jobId,
+        recruiter: req.user.id
+      });
+
+      if (!job) {
+        return res.status(404).json({
+          message: "Job not found or you do not own this job."
+        });
+      }
+
+      const applications = await Application.find({
+        job: job._id
+      })
+        .populate("candidate", "name email skills")
+        .populate("job", "title company")
+        .sort({ createdAt: -1 });
+
+      res.json({
+        count: applications.length,
+        applications
+      });
+    } catch (error) {
+      console.error("Recruiter applications error:", error.message);
+      res.status(500).json({
+        message: "Unable to fetch job applicants."
+      });
+    }
+  }
+);
+
+
+/* Recruiter updates an applicant's status */
+router.patch(
+  "/:applicationId/status",
+  protect,
+  authorize("recruiter"),
+  async (req, res) => {
+    try {
+      const { applicationId } = req.params;
+      const { status } = req.body;
+
+      if (!/^[a-f\d]{24}$/i.test(applicationId)) {
+        return res.status(400).json({
+          message: "Invalid application ID."
+        });
+      }
+
+      const allowedStatuses = [
+        "pending",
+        "reviewing",
+        "shortlisted",
+        "rejected",
+        "accepted"
+      ];
+
+      if (!allowedStatuses.includes(status)) {
+        return res.status(400).json({
+          message: "Invalid application status."
+        });
+      }
+
+      const application = await Application.findById(applicationId)
+        .populate("job", "recruiter title");
+
+      if (!application || !application.job) {
+        return res.status(404).json({
+          message: "Application not found."
+        });
+      }
+
+      // Recruiters can update applications only for their own jobs.
+      if (String(application.job.recruiter) !== String(req.user.id)) {
+        return res.status(403).json({
+          message: "You cannot update applications for this job."
+        });
+      }
+
+      application.status = status;
+      await application.save();
+
+      return res.json({
+        message: "Application status updated successfully.",
+        application
+      });
+    } catch (error) {
+      console.error("Update application status error:", error.message);
+
+      return res.status(500).json({
+        message: "Unable to update application status."
+      });
+    }
+  }
+);
+
+
+module.exports = router;

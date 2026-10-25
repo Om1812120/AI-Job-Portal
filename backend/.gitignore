@@ -1,0 +1,8 @@
+node_modules/
+.env
+.env.*
+uploads/*
+!uploads/.gitkeep
+!uploads/demo-alex-resume.pdf
+*.log
+.DS_Store
