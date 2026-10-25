@@ -65,26 +65,22 @@ if (!process.env.JWT_SECRET) {
   throw new Error("JWT_SECRET is missing from .env");
 }
 
-async function startServer() {
-  try {
-    if (process.env.MONGO_URI) {
-      await mongoose.connect(process.env.MONGO_URI);
+const server = app.listen(PORT, "0.0.0.0", () => {
+  console.log(`AI Job Portal API running on port ${PORT}`);
+});
+
+if (process.env.MONGO_URI) {
+  console.log("Connecting to MongoDB...");
+  mongoose
+    .connect(process.env.MONGO_URI, {
+      serverSelectionTimeoutMS: 10000,
+    })
+    .then(() => {
       console.log("MongoDB connected successfully");
-    } else {
-      console.warn(
-        "MONGO_URI missing. Server running without database."
-      );
-    }
-
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(
-        `AI Job Portal API running on http://0.0.0.0:${PORT}`
-      );
+    })
+    .catch((error) => {
+      console.error("MongoDB connection error:", error.message);
     });
-  } catch (error) {
-    console.error("Startup error:", error.message);
-    process.exit(1);
-  }
+} else {
+  console.warn("MONGO_URI missing. Server running without database.");
 }
-
-startServer();
