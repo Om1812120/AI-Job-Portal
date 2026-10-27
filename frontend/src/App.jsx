@@ -817,7 +817,7 @@ function App() {
 
               <h1>
                 Intelligent Career & Hiring Suite,
-                <span> powered by Multi-Vector ATS Matching.</span>
+                <span> powered by Multi-Factor ATS Matching.</span>
               </h1>
 
               <p className="hero-description">
@@ -842,7 +842,7 @@ function App() {
 
               <div className="trust-note">
                 <ShieldCheck size={17} />
-                Multi-Vector ATS Algorithm · Automated Mock Interview Engine · Secure Resume Vault
+                Multi-Factor ATS Algorithm · Automated Mock Interview Engine · Secure Resume Vault
               </div>
             </div>
 
@@ -1331,7 +1331,7 @@ function App() {
                       <div className="section-toolbar">
                         <div>
                           <h2>Active Job Requisitions</h2>
-                          <p>Monitor candidate pipelines and review multi-vector ATS scores.</p>
+                          <p>Monitor candidate pipelines and review multi-factor ATS scores.</p>
                         </div>
                         <div className="toolbar-actions">
                           <button
@@ -2064,7 +2064,7 @@ function App() {
                           >
                             {aiAnalyzing ? (
                               <>
-                                <RefreshCw className="spin" size={16} /> Parsing ATS Vectors...
+                                <RefreshCw className="spin" size={16} /> Parsing ATS Factors...
                               </>
                             ) : (
                               <>
@@ -2092,7 +2092,7 @@ function App() {
                                 </div>
                               </div>
 
-                              {/* Multi-Vector Sub-Scores */}
+                              {/* Multi-Factor Sub-Scores */}
                               <div className="multi-score-breakdown">
                                 <div className="sub-score-item">
                                   <div className="sub-score-head">
@@ -2165,7 +2165,7 @@ function App() {
                           ) : (
                             <div className="ai-placeholder-card">
                               <BrainCircuit size={48} />
-                              <h3>Multi-Vector ATS Analyzer</h3>
+                              <h3>Multi-Factor ATS Analyzer</h3>
                               <p>
                                 Upload your resume document or paste raw text to inspect keyword distribution, missing competencies, and formatting scores.
                               </p>
@@ -2621,12 +2621,12 @@ function App() {
                         <div className="applicant-match-badge">
                           <div className={`score-badge ${score >= 70 ? "high" : score >= 40 ? "med" : "low"}`}>
                             <Sparkles size={13} />
-                            <span>{score}% Multi-Vector ATS Match</span>
+                            <span>{score}% Multi-Factor ATS Match</span>
                           </div>
                         </div>
                       </div>
 
-                      {/* Multi-Vector Sub-Scores for Recruiter */}
+                      {/* Multi-Factor Sub-Scores for Recruiter */}
                       {match.hardSkillScore !== undefined && (
                         <div className="recruiter-sub-metrics">
                           <span className="sub-metric-pill">
@@ -2771,7 +2771,7 @@ function App() {
           </span>
         </button>
 
-        <p>Multi-Vector AI ATS Engine & Recruitment Pipeline</p>
+        <p>Multi-Factor AI ATS Engine & Recruitment Pipeline</p>
         <span>© {new Date().getFullYear()} HireAI Platform</span>
       </footer>
     </div>
